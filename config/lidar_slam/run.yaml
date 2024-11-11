@@ -8,7 +8,7 @@ sampler:
   surface_sample_range_m: 0.25
 neuralpoints:
   voxel_size_m: 0.4
-  search_alpha: 0.5 # increase when you want to be more robust to agressive motions
+  search_alpha: 0.7 # increase when you want to be more robust to agressive motions
 continual:
   batch_size_new_sample: 1000
   pool_capacity: 1e7

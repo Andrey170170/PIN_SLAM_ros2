@@ -11,12 +11,12 @@ import open3d as o3d
 import torch
 from rich import print
 
-from model.decoder import Decoder
-from model.neural_points import NeuralPoints
-from utils.config import Config
-from utils.mesher import Mesher
-from utils.tools import setup_experiment, split_chunks
-from utils.visualizer import MapVisualizer
+from src.pin_slam.pin_slam.model.decoder import Decoder
+from src.pin_slam.pin_slam.model.neural_points import NeuralPoints
+from src.pin_slam.pin_slam.utils.config import Config
+from src.pin_slam.pin_slam.utils.mesher import Mesher
+from src.pin_slam.pin_slam.utils.tools import setup_experiment, split_chunks
+from src.pin_slam.pin_slam.utils.visualizer import MapVisualizer
 
 '''
     load the pin-map and do the reconstruction 
@@ -84,6 +84,7 @@ def vis_pin_map():
 
     down_rate = 1
 
+    chunks_aabb = []
     crop_file_name = "neural_points.ply" # default name
     if len(sys.argv) > 3: # only use cropped bbx for meshing
         crop_file_name = sys.argv[3]

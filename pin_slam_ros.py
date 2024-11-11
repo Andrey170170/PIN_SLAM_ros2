@@ -23,15 +23,15 @@ from rich import print
 from sensor_msgs.msg import PointCloud2, PointField
 from std_srvs.srv import Empty, EmptyResponse
 
-from dataset.slam_dataset import SLAMDataset
-from model.decoder import Decoder
-from model.neural_points import NeuralPoints
-from utils.config import Config
-from utils.loop_detector import NeuralPointMapContextManager, detect_local_loop
-from utils.mapper import Mapper
-from utils.mesher import Mesher
-from utils.pgo import PoseGraphManager
-from utils.tools import (
+from pin_slam.pin_slam.dataset.slam_dataset import SLAMDataset
+from src.pin_slam.pin_slam.model.decoder import Decoder
+from src.pin_slam.pin_slam.model.neural_points import NeuralPoints
+from src.pin_slam.pin_slam.utils.config import Config
+from src.pin_slam.pin_slam.utils import NeuralPointMapContextManager, detect_local_loop
+from src.pin_slam.pin_slam.utils import Mapper
+from src.pin_slam.pin_slam.utils import Mesher
+from src.pin_slam.pin_slam.utils.pgo import PoseGraphManager
+from src.pin_slam.pin_slam.utils.tools import (
     freeze_decoders,
     get_time,
     load_decoder,
@@ -41,7 +41,7 @@ from utils.tools import (
     track_progress,
     transform_torch,
 )
-from utils.tracker import Tracker
+from src.pin_slam.pin_slam.utils.tracker import Tracker
 
 '''
     📍PIN-SLAM: LiDAR SLAM Using a Point-Based Implicit Neural Representation for Achieving Global Map Consistency
