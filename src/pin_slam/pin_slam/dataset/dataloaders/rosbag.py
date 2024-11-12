@@ -44,7 +44,7 @@ class RosbagDataset:
             print('rosbags library not installed, run "pip install -U rosbags"')
             sys.exit(1)
 
-        from src.pin_slam.pin_slam.utils import read_point_cloud
+        from pin_slam.utils.point_cloud2 import read_point_cloud
 
         self.read_point_cloud = read_point_cloud
         if data_dir.is_file():

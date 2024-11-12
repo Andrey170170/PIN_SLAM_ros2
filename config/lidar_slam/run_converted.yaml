@@ -1,0 +1,50 @@
+setting:
+  name: "test_pin"
+  output_root: "./experiments"
+#  pc_path: "/media/andrey/Data Disk/Projects/Python/AutoDrive/data/rosbags/2024_06_18/ply_2024_06_18_Right_Turn"
+  deskew: True
+process:
+  min_range_m: 3.0
+  max_range_m: 80.0
+  vox_down_m: 0.08
+  min_z_m: -3.5
+  dynamic_filter_on: True
+  dynamic_certainty_thre: 1.0
+  dynamic_sdf_ratio_thre: 0.5
+  dynamic_min_grad_norm_thre: 0.25
+sampler:
+  surface_sample_range_m: 0.25
+  surface_sample_n: 3
+  free_sample_begin_ratio: 0.3
+  free_sample_end_dist_m: 1.0
+  free_front_sample_n: 4 # large value here for more free-space supervision
+neuralpoints:
+  voxel_size_m: 0.4
+  feature_dim: 8
+  query_nn_k: 6
+  search_alpha: 0.5
+  weighted_first: False
+decoder:
+  freeze_after_frame: 40
+loss:
+  main_loss_type: bce
+  sigma_sigmoid_m: 0.08
+  loss_weight_on: True
+  dist_weight_scale: 0.8
+  ekional_loss_on: True
+  weight_e: 0.5
+continual:
+  batch_size_new_sample: 1000
+  pool_capacity: 2e7
+tracker:
+  source_vox_down_m: 0.6
+  iter_n: 100
+  GM_grad: 0.1
+  GM_dist: 0.2
+pgo:
+  pgo_freq_frame: 20
+  context_cosdist: 0.3
+optimizer: # mapper
+  batch_size: 16384
+eval:
+  silence_log: True
