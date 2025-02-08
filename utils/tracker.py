@@ -54,7 +54,21 @@ class Tracker:
         loop_reg: bool = False,
         vis_result: bool = False,
     ):
-
+        """
+        Perform tracking
+        Args:
+            source_points: N,3 torch tensor, the coordinates of all N query points
+            init_pose: 4,4 torch tensor, the initial pose
+            source_colors: N,3 torch tensor, the colors of all N query points
+            source_normals: N,3 torch tensor, the normals of all N query points
+            source_sdf: N torch tensor, the SDF values of all N query points
+            cur_ts: float, the timestamp of the current frame
+            loop_reg: bool, whether this is a registration for loop closure
+            vis_result: bool, whether to visualize the result
+        Returns:
+            T: 4,4 torch tensor, the final pose
+            cov_mat: 6,6 torch tensor, the covariance matrix
+        """
         if init_pose is None:
             T = torch.eye(4, dtype=torch.float64, device=self.device)
         else:
@@ -365,7 +379,9 @@ class Tracker:
         lm_lambda=0.0,
         vis_weight_pc=False,
     ):  # if lm_lambda = 0, then it's Gaussian Newton Optimization
-
+        """
+        Perform one step of registration
+        """
         T0 = get_time()
 
         colors_on = colors is not None and self.config.color_on
@@ -635,7 +651,7 @@ def implicit_reg(
             3 dim translation part of the eigenvalues for the registration degerancy check
     """
 
-    cross = torch.cross(points, sdf_grad, dim=-1)  # N,3 x N,3
+    cross = torch.linalg.cross(points, sdf_grad, dim=-1)  # N,3 x N,3
     J_mat = torch.cat(
         [cross, sdf_grad], -1
     )  # The Jacobian matrix # first rotation, then translation # N, 6
@@ -694,7 +710,7 @@ def implicit_color_reg(
     lm_lambda=0.0,
 ):
 
-    geo_cross = torch.cross(points, sdf_grad)
+    geo_cross = torch.linalg.cross(points, sdf_grad)
     J_geo = torch.cat([geo_cross, sdf_grad], -1)  # first rotation, then translation
     N_geo = J_geo.T @ (weight * J_geo)
     g_geo = -(J_geo * weight).T @ sdf_residual
@@ -706,7 +722,7 @@ def implicit_color_reg(
     for i in range(
         color_channel
     ):  # we have converted color to intensity, so there's only one channel here
-        color_cross_channel = torch.cross(
+        color_cross_channel = torch.linalg.cross(
             points, color_grad[:, i, :]
         )  # first rotation, then translation
         J_color_channel = torch.cat([color_cross_channel, color_grad[:, i]], -1)
@@ -757,6 +773,9 @@ def ct_registration_step(
 
 # math tools
 def skew(v):
+    """
+    Compute the skew-symmetric matrix of a 3D vector
+    """
     S = torch.zeros(3, 3, device=v.device, dtype=v.dtype)
     S[0, 1] = -v[2]
     S[0, 2] = v[1]
@@ -765,7 +784,9 @@ def skew(v):
 
 
 def expmap(axis_angle: torch.Tensor):
-
+    """
+    Convert an axis-angle representation to a rotation matrix
+    """
     angle = axis_angle.norm()
     axis = axis_angle / angle
     eye = torch.eye(3, device=axis_angle.device, dtype=axis_angle.dtype)
@@ -777,6 +798,9 @@ def expmap(axis_angle: torch.Tensor):
 
 
 def rotation_matrix_to_axis_angle(R):
+    """
+    Convert a rotation matrix to an axis-angle representation
+    """
     # epsilon = 1e-8  # A small value to handle numerical precision issues
     # Ensure the input matrix is a valid rotation matrix
     assert torch.is_tensor(R) and R.shape == (3, 3), "Invalid rotation matrix"

@@ -8,16 +8,18 @@ import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '0' # by default 0, change it here if you want to use other GPU 
 import sys
 
-import rerun as rr
 import numpy as np
 import open3d as o3d
 import torch
+import dtyper as typer
 import wandb
 from rich import print
 from tqdm import tqdm
+from typing import Optional, Tuple
 
 from dataset.dataset_indexing import set_dataset_path
 from dataset.slam_dataset import SLAMDataset
+from dataset.dataloaders import available_dataloaders
 from model.decoder import Decoder
 from model.neural_points import NeuralPoints
 from utils.config import Config
@@ -45,70 +47,92 @@ from utils.visualizer import MapVisualizer
      Y. Pan et al. from IPB
 '''
 
-parser = argparse.ArgumentParser()
-parser.add_argument('config_path', type=str, nargs='?', default='config/lidar_slam/run.yaml', help='[Optional] Path to *.yaml config file, if not set, default config would be used')
-parser.add_argument('dataset_name', type=str, nargs='?', help='[Optional] Name of a specific dataset, example: kitti, mulran, or rosbag (when -d is set)')
-parser.add_argument('sequence_name', type=str, nargs='?', help='[Optional] Name of a specific data sequence or the rostopic for point cloud (when -d is set)')
-parser.add_argument('--seed', type=int, default=42, help='Set the random seed (default 42)')
-parser.add_argument('--input_path', '-i', type=str, default=None, help='Path to the point cloud input directory (this will override the pc_path in config file)')
-parser.add_argument('--output_path', '-o', type=str, default=None, help='Path to the result output directory (this will override the output_root in config file)')
-parser.add_argument('--range', nargs=3, type=int, metavar=('START', 'END', 'STEP'), default=None, help='Specify the start, end and step of the processed frame, for example: --range 10 1000 1')
-parser.add_argument('--data_loader_on', '-d', action='store_true', help='Use specific data loader (you can use the rosbag, pcap, mcap dataloaders and some typical supported datasets)')
-parser.add_argument('--visualize', '-v', action='store_true', help='Turn on the visualizer')
-parser.add_argument('--cpu_only', '-c', action='store_true', help='Run only on CPU')
-parser.add_argument('--log_on', '-l', action='store_true', help='Turn on the logs printing')
-parser.add_argument('--rerun_on', '-r', action='store_true', help='Turn on the rerun logging')
-parser.add_argument('--wandb_on', '-w', action='store_true', help='Turn on the weight & bias logging')
-parser.add_argument('--save_map', '-s', action='store_true', help='Save the PIN map after SLAM')
-parser.add_argument('--save_mesh', '-m', action='store_true', help='Save the reconstructed mesh after SLAM')
-parser.add_argument('--save_merged_pc', '-p', action='store_true', help='Save the merged point cloud after SLAM')
-parser.add_argument('--deskew', action='store_true', help='Try to deskew the LiDAR scans')
+app = typer.Typer(add_completion=False, rich_markup_mode="rich", context_settings={"help_option_names": ["-h", "--help"]})
 
-args, unknown = parser.parse_known_args()
+_available_dl_help = available_dataloaders()
 
-def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=None):
+docstring = f"""
+:round_pushpin: PIN-SLAM: a full-fledged implicit neural LiDAR SLAM system \n
 
+[bold green]Examples: [/bold green]
+
+# Process all pointclouds in the given <data-dir> (*.ply, *.pcd, *.bin, etc.) using default config file
+$ python3 pin_slam.py -i <data-dir>:open_file_folder: -vsm
+
+# Process all pointclouds in the given <data-dir> using specific config file (e.g. run_kitti.yaml)
+$ python3 pin_slam.py <path-to-config-file.yaml>:page_facing_up: -i <data-dir>:open_file_folder: -vsm
+
+# Process a given [bold]ROS1/ROS2 [/bold]rosbag file (directory:open_file_folder:, ".bag":page_facing_up:)
+$ python3 pin_slam.py <path-to-config-file.yaml>:page_facing_up: rosbag -i <path-to-my-rosbag>[:open_file_folder:/:page_facing_up:] -dvsm
+
+# Use a more specific dataloader: {", ".join(_available_dl_help)}
+# For example, to process KITTI dataset sequence 00:
+$ python3 pin_slam.py ./config/lidar_slam/run_kitti.yaml kitti 00 -i <path-to-kitti-root>:open_file_folder: -dvsm
+
+# For example, to process Replica dataset sequence room0:
+$ python3 pin_slam.py ./config/rgbd_slam/run_replica.yaml replica room0 -i <path-to-replica-root>:open_file_folder: -dvsm
+"""
+
+@app.command(help=docstring)
+def run_pin_slam(
+    config_path: str = typer.Argument('config/lidar_slam/run.yaml', help='Path to *.yaml config file'),
+    dataset_name: Optional[str] = typer.Argument(None, help='Name of a specific dataset, example: kitti, mulran, or rosbag (when -d is set)'),
+    sequence_name: Optional[str] = typer.Argument(None, help='Name of a specific data sequence or the rostopic for point cloud (when -d is set)'),
+    input_path: Optional[str] = typer.Option(None, '--input-path', '-i', help='Path to the point cloud input directory'),
+    output_path: Optional[str] = typer.Option(None, '--output-path', '-o', help='Path to the result output directory'),
+    frame_range: Optional[Tuple[int, int, int]] = typer.Option(None, '--range', help='Specify the start, end and step of the processed frame, e.g. --range 10 1000 1'),
+    seed: int = typer.Option(42, help='Set the random seed'),
+    data_loader_on: bool = typer.Option(False, '--data-loader-on', '-d', help='Use specific data loader'),
+    visualize: bool = typer.Option(False, '--visualize', '-v', help='Turn on the visualizer'),
+    cpu_only: bool = typer.Option(False, '--cpu-only', '-c', help='Run only on CPU'),
+    log_on: bool = typer.Option(False, '--log-on', '-l', help='Turn on the logs printing'),
+    rerun_on: bool = typer.Option(False, '--rerun-on', '-r', help='Turn on the rerun logging'),
+    wandb_on: bool = typer.Option(False, '--wandb-on', '-w', help='Turn on the weight & bias logging'),
+    save_map: bool = typer.Option(False, '--save-map', '-s', help='Save the PIN map after SLAM'),
+    save_mesh: bool = typer.Option(False, '--save-mesh', '-m', help='Save the reconstructed mesh after SLAM'),
+    save_merged_pc: bool = typer.Option(False, '--save-merged-pc', '-p', help='Save the merged point cloud after SLAM'),
+    deskew: bool = typer.Option(False, '--deskew', help='Try to deskew the LiDAR scans (this would overwrite the config file deskew parameter)'),
+):
     config = Config()
-    if config_path is not None: # use as a function
-        config.load(config_path)
-        if dataset_name is not None:
-            set_dataset_path(config, dataset_name, sequence_name)
-        if seed is not None:
-            config.seed = seed
-        argv = ['pin_slam.py', config_path, dataset_name, sequence_name, str(seed)]
-        run_path = setup_experiment(config, argv)
-    else: # from args
-        argv = sys.argv
-        config.load(args.config_path)
-        config.use_dataloader = args.data_loader_on
-        config.seed = args.seed
-        config.silence = not args.log_on
-        config.wandb_vis_on = args.wandb_on
-        config.rerun_vis_on = args.rerun_on
-        config.o3d_vis_on = args.visualize
-        config.save_map = args.save_map
-        config.save_mesh = args.save_mesh
-        config.save_merged_pc = args.save_merged_pc
-        if not config.deskew and args.deskew: # set to True if not set in the config file but set upon running
-            config.deskew = True
-        if args.range is not None:
-            config.begin_frame, config.end_frame, config.step_frame = args.range
-        if args.cpu_only:
-            config.device = 'cpu'
-        if args.input_path is not None:
-            config.pc_path = args.input_path
-        if args.output_path is not None:
-            config.output_root = args.output_path
-        if args.dataset_name is not None: # specific dataset [optional]
-            set_dataset_path(config, args.dataset_name, args.sequence_name)
-        run_path = setup_experiment(config, argv)
-        print("[bold green]PIN-SLAM starts[/bold green]","📍" )
+    config.load(config_path)
+    config.use_dataloader = data_loader_on
+    config.seed = seed
+    config.silence = not log_on
+    config.wandb_vis_on = wandb_on
+    config.rerun_vis_on = rerun_on
+    config.o3d_vis_on = visualize
+    config.save_map = save_map
+    config.save_mesh = save_mesh
+    config.save_merged_pc = save_merged_pc
+    
+    if not config.deskew and deskew:
+        config.deskew = True
+    
+    if frame_range:
+        config.begin_frame, config.end_frame, config.step_frame = frame_range
+        
+    if cpu_only:
+        config.device = 'cpu'
+        
+    if input_path:
+        config.pc_path = input_path
+        
+    if output_path:
+        config.output_root = output_path
+        
+    if dataset_name:
+        set_dataset_path(config, dataset_name, sequence_name)
+        
+    argv = sys.argv
+    run_path = setup_experiment(config, argv)
+    print("[bold green]PIN-SLAM starts[/bold green]")
 
     # non-blocking visualizer
     if config.o3d_vis_on:
         o3d_vis = MapVisualizer(config)
 
     if config.rerun_vis_on:
+        import rerun as rr
         rr.init("pin_slam_rerun_viewer", spawn=True)
 
     # initialize the mlp decoder
@@ -444,16 +468,18 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
     neural_pcd = neural_points.get_neural_points_o3d(query_global=True, color_mode = 0)
     if config.save_map:
         o3d.io.write_point_cloud(os.path.join(run_path, "map", "neural_points.ply"), neural_pcd) # write the neural point cloud
-    if config.save_mesh and cur_mesh is None:
-        output_mc_res_m = config.mc_res_m*0.6
+    
+    output_mc_res_m = config.mc_res_m*0.6
+    mc_cm_str = str(round(output_mc_res_m*1e2))
+    if config.save_mesh and cur_mesh is None:    
         chunks_aabb = split_chunks(neural_pcd, neural_pcd.get_axis_aligned_bounding_box(), output_mc_res_m * 300) # reconstruct in chunks
-        mc_cm_str = str(round(output_mc_res_m*1e2))
         mesh_path = os.path.join(run_path, "mesh", "mesh_" + mc_cm_str + "cm.ply")
         cur_mesh = mesher.recon_aabb_collections_mesh(chunks_aabb, output_mc_res_m, mesh_path, False, config.semantic_on, config.color_on, filter_isolated_mesh=True, mesh_min_nn=config.mesh_min_nn)
     neural_points.clear_temp() # clear temp data for output
     if config.save_map:
         save_implicit_map(run_path, neural_points, geo_mlp, color_mlp, sem_mlp)
         # lcd_npmc.save_context_dict(mapper.used_poses, run_path)
+        print("Use 'python vis_pin_map.py {} {} neural_points.ply mesh_out_{}cm.ply' to inspect the map offline.".format(run_path, output_mc_res_m, mc_cm_str))
 
     if config.save_merged_pc:
         dataset.write_merged_point_cloud() # replay: save merged point cloud map
@@ -465,7 +491,9 @@ def run_pin_slam(config_path=None, dataset_name=None, sequence_name=None, seed=N
             odom_poses, gt_poses, pgo_poses = dataset.get_poses_np_for_vis()
             o3d_vis.update_traj(dataset.cur_pose_ref, odom_poses, gt_poses, pgo_poses, loop_edges)
     
+
+
     return pose_eval_results
 
 if __name__ == "__main__":
-    run_pin_slam()
+    app()

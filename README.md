@@ -64,6 +64,9 @@
       <a href="#run-pin-slam">How to run PIN-SLAM</a>
     </li>
     <li>
+      <a href="#docker">Docker</a>
+    </li>
+    <li>
       <a href="#visualizer-instructions">Visualizer instructions</a>
     </li>
     <li>
@@ -195,6 +198,11 @@ python3 pin_slam.py ./config/lidar_slam/run_demo.yaml -vsmc
 
 ### Run on your datasets
 
+Follow the instructions on how to run PIN-SLAM by typing:
+```
+python3 pin_slam.py -h
+```
+
 For an arbitrary data sequence, you can run with the default config file by:
 ```
 python3 pin_slam.py -i /path/to/your/point/cloud/folder -vsm
@@ -202,11 +210,6 @@ python3 pin_slam.py -i /path/to/your/point/cloud/folder -vsm
 
 <details>
   <summary>[More Usage (click to expand)]</summary>
-
-Follow the instructions on how to run PIN-SLAM by typing:
-```
-python3 pin_slam.py -h
-```
 
 To run PIN-SLAM with a specific config file, you can run:
 ```
@@ -333,6 +336,23 @@ python3 vis_pin_map.py ./experiments/sanity_test_*  0.2 neural_points.ply mesh_2
 ```
 </details>
 
+## Docker
+
+Thanks [@schneider-daniel](https://github.com/schneider-daniel) for providing a docker container.
+
+Build the docker container:
+
+```
+cd docker
+sudo chmod +x ./build_docker.sh
+./build_docker.sh
+```
+
+After building the container, configure the storage path in `start_docker.sh` and then run it by:
+```
+sudo chmod +x ./start_docker.sh
+./start_docker.sh
+```
 
 ## Visualizer Instructions
 
@@ -378,17 +398,16 @@ If you use PIN-SLAM for any academic work, please cite our original [paper](http
 
 ```
 @article{pan2024tro,
-author = {Y. Pan and X. Zhong and L. Wiesmann and T. Posewsky and J. Behley and C. Stachniss},
-title = {PIN-SLAM: LiDAR SLAM Using a Point-Based Implicit Neural Representation for Achieving Global Map Consistency},
-journal = {IEEE Transactions on Robotics (TRO)},
-volume = {40},
-page = {4045-4064},
-year = {2024},
-codeurl = {https://github.com/PRBonn/PIN_SLAM}
+  title = {{PIN-SLAM: LiDAR SLAM Using a Point-Based Implicit Neural Representation for Achieving Global Map Consistency}},
+  author = {Pan, Yue and Zhong, Xingguang and Wiesmann, Louis and Posewsky, Th{\"o}rbjorn and Behley, Jens and Stachniss, Cyrill},
+  journal = {IEEE Transactions on Robotics (TRO)},
+  volume = {40},
+  pages = {4045--4064},
+  year = {2024},
+  codeurl = {https://github.com/PRBonn/PIN_SLAM},
+  url = {https://www.ipb.uni-bonn.de/wp-content/papercite-data/pdf/pan2024tro.pdf}
 }
 ```
-
-
 
 ## Contact
 If you have any questions, please contact:
