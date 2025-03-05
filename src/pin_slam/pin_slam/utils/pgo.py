@@ -4,6 +4,8 @@
 # Copyright (c) 2024 Yue Pan, all rights reserved
 
 import gtsam
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.linalg import inv
@@ -47,7 +49,7 @@ class PoseGraphManager:
         self.isam = gtsam.ISAM2()
 
         self.graph_factors = gtsam.NonlinearFactorGraph() # edges # with pose and pose covariance
-        self.graph_initials = gtsam.Values()  # initial guess of the nodes 
+        self.graph_initials = gtsam.Values()  # initial guess of the nodes
 
         self.cur_pose = None
         self.curr_node_idx = None
@@ -73,14 +75,14 @@ class PoseGraphManager:
         """
         self.curr_node_idx = frame_id  # make start with 0
         if not self.graph_initials.exists(
-            gtsam.symbol("x", frame_id)
+                gtsam.symbol("x", frame_id)
         ):  # create if not yet exists
             self.graph_initials.insert(
                 gtsam.symbol("x", frame_id), gtsam.Pose3(init_pose)
             )
 
     def add_pose_prior(
-        self, frame_id: int, prior_pose: np.ndarray, fixed: bool = False
+            self, frame_id: int, prior_pose: np.ndarray, fixed: bool = False
     ):
         """add pose prior unary factor
         Args:
@@ -115,7 +117,7 @@ class PoseGraphManager:
         )
 
     def add_odometry_factor(
-        self, cur_id: int, last_id: int, odom_transform: np.ndarray, cov=None
+            self, cur_id: int, last_id: int, odom_transform: np.ndarray, cov=None
     ):
         """add a odometry factor between two adjacent pose nodes
         Args:
@@ -140,12 +142,12 @@ class PoseGraphManager:
         )  # NOTE: add robust kernel
 
     def add_loop_factor(
-        self,
-        cur_id: int,
-        loop_id: int,
-        loop_transform: np.ndarray,
-        cov=None,
-        reject_outlier=True,
+            self,
+            cur_id: int,
+            loop_id: int,
+            loop_transform: np.ndarray,
+            cov=None,
+            reject_outlier=True,
     ):
         """add a loop closure factor between two pose nodes
         Args:
@@ -172,8 +174,8 @@ class PoseGraphManager:
         if reject_outlier and not self.config.pgo_with_isam:
             cur_error = self.graph_factors.error(self.graph_initials)
             valid_error_thre = (
-                self.last_error
-                + (cur_id - self.last_loop_idx) * self.config.pgo_error_thre_frame
+                    self.last_error
+                    + (cur_id - self.last_loop_idx) * self.config.pgo_error_thre_frame
             )
             if reject_outlier and cur_error > valid_error_thre:
                 if not self.silence:
@@ -182,7 +184,7 @@ class PoseGraphManager:
                     )
                 self.graph_factors.remove(self.graph_factors.size() - 1)
                 return False
-            
+
         return True
 
     def optimize_pose_graph(self):
@@ -211,7 +213,7 @@ class PoseGraphManager:
             if not self.silence:
                 print("[bold red]PGO done[/bold red]")
                 print("error %f --> %f:" % (error_before, error_after))
-        
+
         # if not self.silence:
         #     print("time for factor graph optimization (ms)", (T_1-T_0)*1e3)
 
@@ -319,19 +321,19 @@ class PoseGraphManager:
         return pose_diff
 
     def estimate_drift(
-        self, travel_dist, used_frame_id, drfit_ratio=0.01, correct_ratio=0.005
+            self, travel_dist, used_frame_id, drfit_ratio=0.01, correct_ratio=0.005
     ):
         # estimate the current drift # better to calculate also considering the residual
         self.drift_radius = (
-            travel_dist[used_frame_id] - travel_dist[self.last_loop_idx]
-        ) * drfit_ratio
+                                    travel_dist[used_frame_id] - travel_dist[self.last_loop_idx]
+                            ) * drfit_ratio
         if (
-            self.min_loop_idx < self.last_loop_idx
+                self.min_loop_idx < self.last_loop_idx
         ):  # the loop has been corrected previously
             self.drift_radius += (
-                travel_dist[self.min_loop_idx]
-                + travel_dist[used_frame_id] * correct_ratio
-            ) * drfit_ratio
+                                         travel_dist[self.min_loop_idx]
+                                         + travel_dist[used_frame_id] * correct_ratio
+                                 ) * drfit_ratio
         # if not self.silence:
         #     print("Estimated drift (m):", self.drift_radius)
 

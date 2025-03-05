@@ -22,17 +22,15 @@ class Tracker:
         self,
         config: Config,
         neural_points: NeuralPoints,
-        geo_decoder: Decoder,
-        sem_decoder: Decoder,
-        color_decoder: Decoder,
+        decoders: dict
     ):
 
         self.config = config
         self.silence = config.silence
         self.neural_points = neural_points
-        self.geo_decoder = geo_decoder
-        self.sem_decoder = sem_decoder
-        self.color_decoder = color_decoder
+        self.sdf_mlp = decoders["sdf"]
+        self.sem_mlp = decoders["semantic"]
+        self.color_mlp = decoders["color"]
         self.device = config.device
         self.dtype = config.dtype
         # NOTE: use torch.float64 for all the transformations and poses
@@ -54,7 +52,21 @@ class Tracker:
         loop_reg: bool = False,
         vis_result: bool = False,
     ):
-
+        """
+        Perform tracking
+        Args:
+            source_points: N,3 torch tensor, the coordinates of all N query points
+            init_pose: 4,4 torch tensor, the initial pose
+            source_colors: N,3 torch tensor, the colors of all N query points
+            source_normals: N,3 torch tensor, the normals of all N query points
+            source_sdf: N torch tensor, the SDF values of all N query points
+            cur_ts: float, the timestamp of the current frame
+            loop_reg: bool, whether this is a registration for loop closure
+            vis_result: bool, whether to visualize the result
+        Returns:
+            T: 4,4 torch tensor, the final pose
+            cov_mat: 6,6 torch tensor, the covariance matrix
+        """
         if init_pose is None:
             T = torch.eye(4, dtype=torch.float64, device=self.device)
         else:
@@ -85,7 +97,7 @@ class Tracker:
             min_valid_ratio = 0.15
 
         max_increment_sdf_residual_ratio = 1.1
-        eigenvalue_ratio_thre = 0.005
+        eigenvalue_ratio_thre = self.config.eigenvalue_ratio_thre # 0.005
         min_valid_points = 30
         converged = False
         valid_flag = True
@@ -179,9 +191,9 @@ class Tracker:
 
         if not self.silence:
             print("# Valid source point             :", valid_point_count)
-            print("Odometry residual (cm):", sdf_residual_cm)
+            print("Odometry residual (cm): {:.2f}".format(sdf_residual_cm))
             if photo_residual is not None:
-                print("Photometric residual:", photo_residual)
+                print("Photometric residual: {:.2f}".format(photo_residual))
 
         if sdf_residual_cm > max_valid_final_sdf_residual_cm:
             if not self.silence:
@@ -297,7 +309,7 @@ class Tracker:
 
             # print(weight_knn)
             if query_sdf:
-                batch_sdf = self.geo_decoder.sdf(batch_geo_feature)
+                batch_sdf = self.sdf_mlp.sdf(batch_geo_feature)
                 if not self.config.weighted_first:
                     # batch_sdf = torch.sum(batch_sdf * weight_knn, dim=1).squeeze(1)
                     # print(batch_sdf.squeeze(-1))
@@ -322,13 +334,13 @@ class Tracker:
                     sdf_grad[head:tail, :] = batch_sdf_grad.detach()
                 sdf_pred[head:tail] = batch_sdf.detach()
             if query_sem:
-                batch_sem_prob = self.sem_decoder.sem_label_prob(batch_geo_feature)
+                batch_sem_prob = self.sem_mlp.sem_label_prob(batch_geo_feature)
                 if not self.config.weighted_first:
                     batch_sem_prob = torch.sum(batch_sem_prob * weight_knn, dim=1)
                 batch_sem = torch.argmax(batch_sem_prob, dim=1)
                 sem_pred[head:tail] = batch_sem.detach()
             if query_color:
-                batch_color = self.color_decoder.regress_color(batch_color_feature)
+                batch_color = self.color_mlp.regress_color(batch_color_feature)
                 if not self.config.weighted_first:
                     batch_color = torch.sum(batch_color * weight_knn, dim=1)  # N, C
                 if query_color_grad:
@@ -365,7 +377,9 @@ class Tracker:
         lm_lambda=0.0,
         vis_weight_pc=False,
     ):  # if lm_lambda = 0, then it's Gaussian Newton Optimization
-
+        """
+        Perform one step of registration
+        """
         T0 = get_time()
 
         colors_on = colors is not None and self.config.color_on
@@ -635,7 +649,7 @@ def implicit_reg(
             3 dim translation part of the eigenvalues for the registration degerancy check
     """
 
-    cross = torch.cross(points, sdf_grad, dim=-1)  # N,3 x N,3
+    cross = torch.linalg.cross(points, sdf_grad, dim=-1)  # N,3 x N,3
     J_mat = torch.cat(
         [cross, sdf_grad], -1
     )  # The Jacobian matrix # first rotation, then translation # N, 6
@@ -694,7 +708,7 @@ def implicit_color_reg(
     lm_lambda=0.0,
 ):
 
-    geo_cross = torch.cross(points, sdf_grad)
+    geo_cross = torch.linalg.cross(points, sdf_grad)
     J_geo = torch.cat([geo_cross, sdf_grad], -1)  # first rotation, then translation
     N_geo = J_geo.T @ (weight * J_geo)
     g_geo = -(J_geo * weight).T @ sdf_residual
@@ -706,7 +720,7 @@ def implicit_color_reg(
     for i in range(
         color_channel
     ):  # we have converted color to intensity, so there's only one channel here
-        color_cross_channel = torch.cross(
+        color_cross_channel = torch.linalg.cross(
             points, color_grad[:, i, :]
         )  # first rotation, then translation
         J_color_channel = torch.cat([color_cross_channel, color_grad[:, i]], -1)
@@ -757,6 +771,9 @@ def ct_registration_step(
 
 # math tools
 def skew(v):
+    """
+    Compute the skew-symmetric matrix of a 3D vector
+    """
     S = torch.zeros(3, 3, device=v.device, dtype=v.dtype)
     S[0, 1] = -v[2]
     S[0, 2] = v[1]
@@ -765,7 +782,9 @@ def skew(v):
 
 
 def expmap(axis_angle: torch.Tensor):
-
+    """
+    Convert an axis-angle representation to a rotation matrix
+    """
     angle = axis_angle.norm()
     axis = axis_angle / angle
     eye = torch.eye(3, device=axis_angle.device, dtype=axis_angle.dtype)
@@ -777,6 +796,9 @@ def expmap(axis_angle: torch.Tensor):
 
 
 def rotation_matrix_to_axis_angle(R):
+    """
+    Convert a rotation matrix to an axis-angle representation
+    """
     # epsilon = 1e-8  # A small value to handle numerical precision issues
     # Ensure the input matrix is a valid rotation matrix
     assert torch.is_tensor(R) and R.shape == (3, 3), "Invalid rotation matrix"

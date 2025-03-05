@@ -26,8 +26,9 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 import wandb
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
-from matplotlib.cm import viridis
 from torch import optim
 from torch.autograd import grad
 from torch.optim.optimizer import Optimizer
@@ -42,11 +43,10 @@ def setup_experiment(config: Config, argv=None, debug_mode: bool = False):
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # begining timestamp
 
     o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
-    warnings.filterwarnings("ignore", category=FutureWarning) 
+    warnings.filterwarnings("ignore", category=FutureWarning)
 
-    run_name = config.name + "_" + ts  # modified to a name that is easier to index
-
-    run_path = os.path.join(config.output_root, run_name)
+    config.run_name = config.name + "_" + ts  # modified to a name that is easier to index
+    run_path = os.path.join(config.output_root, config.run_name)
 
     cuda_available = torch.cuda.is_available()
     if not cuda_available:
@@ -54,6 +54,11 @@ def setup_experiment(config: Config, argv=None, debug_mode: bool = False):
         config.device = "cpu"
     else:
         torch.cuda.empty_cache()
+    if config.device == "cpu":
+        print("Using the pure CPU mode, this would be slow")
+
+    # set X service (FIXME)
+    os.environ["DISPLAY"] = ":1"
 
     # set the random seed for all
     seed_anything(config.seed)
@@ -84,7 +89,7 @@ def setup_experiment(config: Config, argv=None, debug_mode: bool = False):
             wandb.init(
                 project="PIN_SLAM", config=vars(config), dir=run_path
             )  # your own worksapce
-            wandb.run.name = run_name
+            wandb.run.name = config.run_name
 
         # config file and reproducable shell script
         if argv is not None:
@@ -93,7 +98,7 @@ def setup_experiment(config: Config, argv=None, debug_mode: bool = False):
             else:
                 config_path = "config/lidar_slam/run.yaml"
             # copy the config file to the result folder
-            shutil.copy2(config_path, run_path)  
+            shutil.copy2(config_path, run_path)
 
             git_commit_id = (
                 subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
@@ -104,7 +109,7 @@ def setup_experiment(config: Config, argv=None, debug_mode: bool = False):
                 reproduce_shell.write(run_str)
 
 
-        # disable lidar deskewing when not input per frame 
+        # disable lidar deskewing when not input per frame
         if config.step_frame > 1:
             config.deskew = False
 
@@ -134,13 +139,13 @@ def remove_gpu_cache():
         torch.cuda.empty_cache()
 
 def setup_optimizer(
-    config: Config,
-    neural_point_feat,
-    mlp_geo_param=None,
-    mlp_sem_param=None,
-    mlp_color_param=None,
-    poses=None,
-    lr_ratio=1.0,
+        config: Config,
+        neural_point_feat,
+        mlp_geo_param=None,
+        mlp_sem_param=None,
+        mlp_color_param=None,
+        poses=None,
+        lr_ratio=1.0,
 ) -> Optimizer:
     lr_cur = config.lr * lr_ratio
     lr_pose = config.lr_pose
@@ -206,11 +211,11 @@ def setup_wandb():
 
 
 def step_lr_decay(
-    optimizer: Optimizer,
-    learning_rate: float,
-    iteration_number: int,
-    steps: List,
-    reduce: float = 1.0,
+        optimizer: Optimizer,
+        learning_rate: float,
+        iteration_number: int,
+        steps: List,
+        reduce: float = 1.0,
 ):
 
     if reduce > 1.0 or reduce <= 0.0:
@@ -227,8 +232,10 @@ def step_lr_decay(
     return learning_rate
 
 
-# calculate the analytical gradient by pytorch auto diff
 def get_gradient(inputs, outputs):
+    """
+    Calculate the analytical gradient by pytorch auto diff
+    """
     d_points = torch.ones_like(outputs, requires_grad=False, device=outputs.device)
     points_grad = grad(
         outputs=outputs,
@@ -253,73 +260,64 @@ def unfreeze_model(model: nn.Module):
             param.requires_grad = True
 
 
-def freeze_decoders(geo_decoder, sem_decoder, color_decoder, config):
+def freeze_decoders(mlp_dict, config):
     if not config.silence:
-        print("Freeze the decoder")
-    freeze_model(geo_decoder)  # fixed the geo decoder
-    if config.semantic_on:
-        freeze_model(sem_decoder)  # fixed the sem decoder
-    if config.color_on:
-        freeze_model(color_decoder)  # fixed the color decoder
+        print("Freeze the decoders")
 
+    keys = list(mlp_dict.keys())
+    for key in keys:
+        mlp = mlp_dict[key]
+        if mlp is not None:
+            freeze_model(mlp)
 
-def save_checkpoint(
-    neural_points,
-    geo_decoder,
-    color_decoder,
-    sem_decoder,
-    optimizer,
-    run_path,
-    checkpoint_name,
-    iters,
-):
-    torch.save(
-        {
-            "iters": iters,
-            "neural_points": neural_points,  # save the whole NN module
-            "geo_decoder": geo_decoder.state_dict(),
-            "color_decoder": color_decoder.state_dict(),
-            "sem_decoder": sem_decoder.state_dict(),
-            "optimizer": optimizer.state_dict(),
-        },
-        os.path.join(run_path, f"{checkpoint_name}.pth"),
-    )
-    print(f"save the model to {run_path}/{checkpoint_name}.pth")
+def unfreeze_decoders(mlp_dict, config):
+    if not config.silence:
+        print("Unfreeze the decoders")
+    keys = list(mlp_dict.keys())
+    for key in keys:
+        mlp = mlp_dict[key]
+        if mlp is not None:
+            unfreeze_model(mlp)
 
 
 def save_implicit_map(
-    run_path, neural_points, geo_decoder, color_decoder=None, sem_decoder=None
+        run_path, neural_points, mlp_dict, with_footprint: bool = True
 ):
+    # together with the mlp decoders
 
-    map_dict = {"neural_points": neural_points, "geo_decoder": geo_decoder.state_dict()}
-    if color_decoder is not None:
-        map_dict["color_decoder"] = color_decoder.state_dict()
-    if sem_decoder is not None:
-        map_dict["sem_decoder"] = sem_decoder.state_dict()
+    map_model = {"neural_points": neural_points}
+
+    for key in list(mlp_dict.keys()):
+        if mlp_dict[key] is not None:
+            map_model[key] = mlp_dict[key].state_dict()
+        else:
+            map_model[key] = None
 
     model_save_path = os.path.join(run_path, "model", "pin_map.pth")  # end with .pth
-    torch.save(map_dict, model_save_path)
+    torch.save(map_model, model_save_path)
 
     print(f"save the map to {model_save_path}")
 
-    np.save(
-        os.path.join(run_path, "memory_footprint.npy"),
-        np.array(neural_points.memory_footprint),
-    )  # save detailed memory table
+    if with_footprint:
+        np.save(
+            os.path.join(run_path, "memory_footprint.npy"),
+            np.array(neural_points.memory_footprint),
+        )  # save detailed memory table
 
 
-def load_decoder(config, geo_mlp, sem_mlp, color_mlp):
-    loaded_model = torch.load(config.model_path)
-    geo_mlp.load_state_dict(loaded_model["geo_decoder"])
-    print("Pretrained decoder loaded")
-    freeze_model(geo_mlp)  # fixed the decoder
-    if config.semantic_on:
-        sem_mlp.load_state_dict(loaded_model["sem_decoder"])
-        freeze_model(sem_mlp)  # fixed the decoder
-    if config.color_on:
-        color_mlp.load_state_dict(loaded_model["color_decoder"])
-        freeze_model(color_mlp)  # fixed the decoder
+def load_decoders(loaded_model, mlp_dict, freeze_decoders: bool = True):
 
+    for key in list(loaded_model.keys()):
+        if key != "neural_points":
+            if loaded_model[key] is not None:
+                mlp_dict[key].load_state_dict(loaded_model[key])
+                if freeze_decoders:
+                    freeze_model(mlp_dict[key])
+
+    print("Pretrained decoders loaded")
+
+def create_bbx_o3d(center, half_size):
+    return o3d.geometry.AxisAlignedBoundingBox(center - half_size, center + half_size)
 
 def get_time():
     """
@@ -343,6 +341,35 @@ def track_progress():
         wrapper.calls = 0
         return wrapper
     return decorator
+
+def is_prime(n):
+    """Helper function to check if a number is prime."""
+    if n < 2:
+        return False
+    for i in range(2, int(n ** 0.5) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+def find_closest_prime(n):
+    """Find the closest prime number to n."""
+    if n < 2:
+        return 2
+
+    if is_prime(n):
+        return n
+
+    # Check numbers both above and below n
+    lower = n - 1
+    upper = n + 1
+
+    while True:
+        if is_prime(lower):
+            return lower
+        if is_prime(upper):
+            return upper
+        lower -= 1
+        upper += 1
 
 
 def load_from_json(filename: Path):
@@ -387,8 +414,10 @@ def create_axis_aligned_bounding_box(center, size):
 
 
 def apply_quaternion_rotation(quat: torch.tensor, points: torch.tensor) -> torch.tensor:
-    # apply passive rotation: coordinate system rotation w.r.t. the points
-    # p' = qpq^-1
+    """
+    Apply passive rotation: coordinate system rotation w.r.t. the points
+    p' = qpq^-1
+    """
     quat_w = quat[..., 0].unsqueeze(-1)
     quat_xyz = -quat[..., 1:]
     t = 2 * torch.linalg.cross(quat_xyz, points)
@@ -404,10 +433,10 @@ def rotmat_to_quat(rot_matrix: torch.tensor):
     return N,4
     """
     qw = (
-        torch.sqrt(
-            1.0 + rot_matrix[:, 0, 0] + rot_matrix[:, 1, 1] + rot_matrix[:, 2, 2]
-        )
-        / 2.0
+            torch.sqrt(
+                1.0 + rot_matrix[:, 0, 0] + rot_matrix[:, 1, 1] + rot_matrix[:, 2, 2]
+            )
+            / 2.0
     )
     qx = (rot_matrix[:, 2, 1] - rot_matrix[:, 1, 2]) / (4.0 * qw)
     qy = (rot_matrix[:, 0, 2] - rot_matrix[:, 2, 0]) / (4.0 * qw)
@@ -416,6 +445,11 @@ def rotmat_to_quat(rot_matrix: torch.tensor):
 
 
 def quat_to_rotmat(quaternions: torch.tensor):
+    """
+    Convert a batch of quaternions to rotation matrices.
+    quaternions: N,4
+    return N,3,3
+    """
     # Ensure quaternions are normalized
     quaternions /= torch.norm(quaternions, dim=1, keepdim=True)
 
@@ -443,7 +477,7 @@ def quat_to_rotmat(quaternions: torch.tensor):
             2 * (xz - wy),
             2 * (yz + wx),
             1 - 2 * (x2 + y2),
-        ],
+            ],
         dim=1,
     ).view(-1, 3, 3)
 
@@ -469,6 +503,9 @@ def quat_multiply(q1: torch.tensor, q2: torch.tensor):
 
 
 def torch2o3d(points_torch):
+    """
+    Convert a batch of points from torch to o3d
+    """
     pc_o3d = o3d.geometry.PointCloud()
     points_np = points_torch.cpu().detach().numpy().astype(np.float64)
     pc_o3d.points = o3d.utility.Vector3dVector(points_np)
@@ -476,12 +513,22 @@ def torch2o3d(points_torch):
 
 
 def o3d2torch(o3d, device="cpu", dtype=torch.float32):
+    """
+    Convert a batch of points from o3d to torch
+    """
     return torch.tensor(np.asarray(o3d.points), dtype=dtype, device=device)
 
 
 def transform_torch(points: torch.tensor, transformation: torch.tensor):
-    # points [N, 3]
-    # transformation [4, 4]
+    """
+    Transform a batch of points by a transformation matrix
+    Args:
+        points: N,3 torch tensor, the coordinates of all N (axbxc) query points in the scaled
+                kaolin coordinate system [-1,1]
+        transformation: 4,4 torch tensor, the transformation matrix
+    Returns:
+        transformed_points: N,3 torch tensor, the transformed coordinates
+    """
     # Add a homogeneous coordinate to each point in the point cloud
     points_homo = torch.cat([points, torch.ones(points.shape[0], 1).to(points)], dim=1)
 
@@ -495,9 +542,15 @@ def transform_torch(points: torch.tensor, transformation: torch.tensor):
 
 
 def transform_batch_torch(points: torch.tensor, transformation: torch.tensor):
-    # points [N, 3]
-    # transformation [N, 4, 4]
-    # N,3,3 @ N,3,1 -> N,3,1 + N,3,1 -> N,3,1 -> N,3
+    """
+    Transform a batch of points by a batch of transformation matrices
+    Args:
+        points: N,3 torch tensor, the coordinates of all N (axbxc) query points in the scaled
+                kaolin coordinate system [-1,1]
+        transformation: N,4,4 torch tensor, the transformation matrices
+    Returns:
+        transformed_points: N,3 torch tensor, the transformed coordinates
+    """
 
     # Extract rotation and translation components
     rotation = transformation[:, :3, :3].to(points)
@@ -534,7 +587,7 @@ def voxel_down_sample_torch(points: torch.tensor, voxel_size: float):
     center = (grid + 0.5) * voxel_size
     dist = ((points - center) ** 2).sum(dim=1) ** 0.5
     dist = (
-        dist / dist.max() * (_quantization - 1)
+            dist / dist.max() * (_quantization - 1)
     ).long()  # for speed up # [0-_quantization]
 
     grid = grid.long() - offset
@@ -562,7 +615,7 @@ def voxel_down_sample_torch(points: torch.tensor, voxel_size: float):
 
 
 def voxel_down_sample_min_value_torch(
-    points: torch.tensor, voxel_size: float, value: torch.tensor
+        points: torch.tensor, voxel_size: float, value: torch.tensor
 ):
     """
         voxel based downsampling. Returns the indices of the points which has the minimum value in the voxel.
@@ -605,11 +658,13 @@ def voxel_down_sample_min_value_torch(
 
 # split a large point cloud into bounding box chunks
 def split_chunks(
-    pc: o3d.geometry.PointCloud(),
-    aabb: o3d.geometry.AxisAlignedBoundingBox(),
-    chunk_m: float = 100.0
+        pc: o3d.geometry.PointCloud(),
+        aabb: o3d.geometry.AxisAlignedBoundingBox(),
+        chunk_m: float = 100.0
 ):
-
+    """
+    Split a large point cloud into bounding box chunks
+    """
     if not pc.has_points():
         return None
 
@@ -618,7 +673,7 @@ def split_chunks(
 
     min_bound = aabb.get_min_bound()
     max_bound = (
-        aabb.get_max_bound() + 1e-5
+            aabb.get_max_bound() + 1e-5
     )  # just to gurantee there's a zero on one side
     bbx_range = max_bound - min_bound
     if bbx_range[0] > bbx_range[1]:
@@ -678,9 +733,11 @@ def split_chunks(
 
 # torch version of lidar undistortion (deskewing)
 def deskewing(
-    points: torch.tensor, ts: torch.tensor, pose: torch.tensor, ts_mid_pose=0.5
+        points: torch.tensor, ts: torch.tensor, pose: torch.tensor, ts_mid_pose=0.5
 ):
-
+    """
+    Deskew a batch of points at timestamp ts by a relative transformation matrix
+    """
     if ts is None:
         return points  # no deskewing
 
@@ -696,7 +753,7 @@ def deskewing(
     ts = (ts - min_ts) / (max_ts - min_ts)
 
     # this is related to: https://github.com/PRBonn/kiss-icp/issues/299
-    ts -= ts_mid_pose 
+    ts -= ts_mid_pose
 
     rotmat_slerp = roma.rotmat_slerp(
         torch.eye(3).to(points), pose[:3, :3].to(points), ts
@@ -711,7 +768,9 @@ def deskewing(
 
 
 def tranmat_close_to_identity(mats: np.ndarray, rot_thre: float, tran_thre: float):
-
+    """
+    Check if a batch of transformation matrices is close to identity
+    """
     rot_diff = np.abs(mats[:3, :3] - np.identity(3))
 
     rot_close_to_identity = np.all(rot_diff < rot_thre)
@@ -726,10 +785,10 @@ def tranmat_close_to_identity(mats: np.ndarray, rot_thre: float, tran_thre: floa
         return False
 
 def feature_pca_torch(data, principal_components = None,
-                     principal_dim: int = 3,
-                     down_rate: int = 1,
-                     project_data: bool = True,
-                     normalize: bool = True):
+                      principal_dim: int = 3,
+                      down_rate: int = 1,
+                      project_data: bool = True,
+                      normalize: bool = True):
     """
         do PCA to a NxD torch tensor to get the data along the K principle dimensions
         N is the data count, D is the dimension of the data
@@ -765,13 +824,14 @@ def feature_pca_torch(data, principal_components = None,
         data_pca = torch.matmul(data_centered, principal_components) # N, D @ D, P
 
         # normalize to show as rgb
-        if normalize: 
+        if normalize:
             # min_vals = data_pca.min(dim=0, keepdim=True).values
             # max_vals = data_pca.max(dim=0, keepdim=True).values
 
             # # deal with outliers
-            min_vals = torch.quantile(data_pca, 0.02, dim=0, keepdim=True)
-            max_vals = torch.quantile(data_pca, 0.98, dim=0, keepdim=True)
+            quantile_down_rate = 31 # quantile has count limit, downsample the data to avoid the limit
+            min_vals = torch.quantile(data_pca[::quantile_down_rate], 0.02, dim=0, keepdim=True)
+            max_vals = torch.quantile(data_pca[::quantile_down_rate], 0.98, dim=0, keepdim=True)
 
             # Normalize to range [0, 1]
             data_pca = (data_pca - min_vals) / (max_vals - min_vals)
@@ -781,7 +841,9 @@ def feature_pca_torch(data, principal_components = None,
     return data_pca, principal_components
 
 def plot_timing_detail(time_table: np.ndarray, saving_path: str, with_loop=False):
-
+    """
+    Plot the timing detail for processing per frame
+    """
     frame_count = time_table.shape[0]
     time_table_ms = time_table * 1e3
 
@@ -795,7 +857,7 @@ def plot_timing_detail(time_table: np.ndarray, saving_path: str, with_loop=False
     color_values = np.linspace(0, 1, 6)
     # Get the colors from the "viridis" colormap at the specified values
     # plasma, Pastel1, tab10
-    colors = [viridis(x) for x in color_values]
+    colors = [plt.colormaps["viridis"](c) for c in color_values]
 
     fig = plt.figure(figsize=(12.0, 4.0))
 

@@ -4,6 +4,7 @@
 # Copyright (c) 2024 Yue Pan, all rights reserved
 
 # Adapted from Nacho's awesome lidar visualizer (https://github.com/PRBonn/lidar-visualizer)
+# This is deprecated, now we use the GUI in gui/slam_gui.py
 
 import os
 from functools import partial
@@ -55,11 +56,13 @@ class MapVisualizer:
 
         self.pgo_edges = o3d.geometry.LineSet()
 
-        self.log_path = "/"
+        self.log_path = "./"
         self.sdf_slice_height = 0.0
         self.mc_res_m = 0.1
         self.mesh_min_nn = 10
         self.keep_local_mesh = True
+
+        self.frame_axis_len = 0.5
 
         if config is not None:
             self.log_path = os.path.join(config.run_path, "log")
@@ -286,7 +289,7 @@ class MapVisualizer:
 
     def _save_cur_vis(self, vis):
         if self.data_pool.has_points():
-            data_pool_pc_name = str(self.cur_frame_id) + "_training_data_pool.ply"
+            data_pool_pc_name = str(self.cur_frame_id) + "_training_sdf_pool.ply"
             data_pool_pc_path = os.path.join(self.log_path, data_pool_pc_name)
             o3d.io.write_point_cloud(data_pool_pc_path, self.data_pool)
             print("Output current training data pool to: ", data_pool_pc_path)
@@ -605,7 +608,7 @@ class MapVisualizer:
                     self.odom_traj.paint_uniform_color(BLUE)
 
                 if self.ego_view and cur_pose is not None:
-                    self.odom_traj.transform(np.linalg.inv(cur_pose))        
+                    self.odom_traj.transform(np.linalg.inv(cur_pose))
         else:
             self.odom_traj = o3d.geometry.LineSet()
 

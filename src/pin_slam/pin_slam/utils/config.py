@@ -16,6 +16,7 @@ class Config:
 
         # settings
         self.name: str = "dummy"  # experiment name
+        self.run_name: str = self.name # this would also include an unique timestamp
 
         self.run_path: str = ""
         self.output_root: str = "experiments"  # output root folder
@@ -59,7 +60,7 @@ class Config:
         self.adaptive_range_on: bool = False # use an adpative range
 
         # filter for z coordinates (unit: m)
-        self.min_z: float = -5.0  
+        self.min_z: float = -5.0
         self.max_z: float = 80.0
 
         self.rand_downsample: bool = False  # apply random or voxel downsampling to input original point clcoud
@@ -78,9 +79,12 @@ class Config:
         self.color_on: bool = False
         self.color_channel: int = 0 # For RGB, channel=3, For Lidar with intensity, channel=1
 
+        # robust processing
+        self.reboot_frame_thre: int = 5 # if lose track for more than this frame, we consider the system failed and reboot the system
+
         # map-based dynamic filtering (observations in certain freespace are dynamic)
         self.dynamic_filter_on: bool = False
-        self.dynamic_certainty_thre: float = 1.0 
+        self.dynamic_certainty_thre: float = 1.0
         self.dynamic_sdf_ratio_thre: float = 0.5 # type1 dynamic
         self.dynamic_min_grad_norm_thre: float = 0.25 # type2 dynamic
 
@@ -129,7 +133,7 @@ class Config:
         self.pool_capacity: int = int(1e7)
         self.bs_new_sample: int = 2048 # number of the sample per batch for the current frame's data, half of all the data
         self.new_certainty_thre: float = 1.0
-        self.pool_filter_freq: int = 10 
+        self.pool_filter_freq: int = 10
 
         # MLP decoder
         self.mlp_bias_on: bool = True
@@ -144,7 +148,8 @@ class Config:
         # or the feature dim of the neural point latent feature,
         # or the iteration number for mapping
         # or decrease the voxel size (resolution) for neural points
-        self.freeze_after_frame: int = 40  # if the decoder model is not loaded, it would be trained and freezed after such frame number
+        self.decoder_freezed: bool = False
+        self.freeze_after_frame: int = 40  # if the decoder model is not loaded, it would be trained and freezed after such frame number # TODO: change to based on moving frames
 
         # positional encoding related [not used]
         self.use_gaussian_pe: bool = False # use Gaussian Fourier or original log positional encoding
@@ -164,7 +169,7 @@ class Config:
         self.behind_dropoff_on: bool = False  # behind surface drop off weight
         self.dist_weight_on: bool = True  # weight decrease linearly with the measured distance, reflecting the measurement noise
         self.dist_weight_scale: float = 0.8 # weight changing range [0.6, 1.4]
-        
+
         self.numerical_grad: bool = True # use numerical SDF gradient as in the paper Neuralangelo for the Ekional regularization during mapping
         self.gradient_decimation: int = 10 # use just a part of the points for the ekional loss when using the numerical grad, save computing time
         self.num_grad_step_ratio: float = 0.2 # step as a ratio of the nerual point resolution, length = num_grad_step_ratio * voxel_size_m
@@ -196,7 +201,7 @@ class Config:
         self.new_sample_ratio_less: float = 0.02 # if smaller than this ratio, we think there's not much new information collected, train less
         self.new_sample_ratio_more: float = 0.15 # if larger than this ratio, we think there are a lot new observations to learn, train more
         self.new_sample_ratio_restart: float = 0.3 # if larger than this ratio, we think maybe tracking is lost, train much more
-        
+
         # local bundle adjustment (ba)  
         self.ba_freq_frame: int = 0 # frame frequency for conducting ba
         self.ba_frame: int = 50 # window size for ba
@@ -224,6 +229,7 @@ class Config:
         self.reg_term_thre_deg: float = 0.01 # iteration termination criteria for rotation 
         self.reg_term_thre_m: float = 0.001  # iteration termination criteria for translation
         self.eigenvalue_check: bool = True # use eigen value of Hessian matrix for degenaracy check
+        self.eigenvalue_ratio_thre: float = 0.005 # threshold for eigenvalue ratio
         self.final_residual_ratio_thre: float = 0.6
 
         # loop closure detection
@@ -243,7 +249,7 @@ class Config:
         self.context_virtual_step_m: float = 2.0 # voxel_size_m * 4.0 
         self.loop_z_check_on: bool = False # check the z axix difference of the found loop frames to deal with the potential abitary issue in a multi-floor building
         self.loop_dist_drift_ratio_thre: float = 2.0 # find the loop candidate only within the distance of (loop_dist_drift_ratio_thre * drift)
-    
+
         # pose graph optimization
         self.pgo_on: bool = False
         self.pgo_freq: int = 30 # frame interval for detecting loop closure and conducting pose graph optimization after a successful loop correction 
@@ -259,17 +265,19 @@ class Config:
 
         # eval
         self.wandb_vis_on: bool = False # monitor the training on weight and bias or not
-        self.rerun_vis_on: bool = False # visualize the process using rerun visualizer or not
         self.silence: bool = True # print log in the terminal or not
         self.o3d_vis_on: bool = False # visualize the mesh in-the-fly using o3d visualzier or not [press space to pasue/resume]
         self.o3d_vis_raw: bool = False # visualize the raw point cloud or the weight source point cloud
-        self.log_freq_frame: int = 0 # save the result log per x frames
+        self.log_freq_frame: int = 2000 # save the result log per x frames
+        self.mesh_default_on: bool = False
         self.mesh_freq_frame: int = 20  # do the reconstruction per x frames
+        self.sdf_default_on: bool = False # visualize the SDF slice or not
         self.sdfslice_freq_frame: int = 1 # visualize the SDF slice per x frames
         self.vis_sdf_slice_v: bool = False # also visualize the vertical SDF slice or not (default only horizontal slice)
         self.sdf_slice_height: float = -1.0 # initial height of the horizontal SDF slice (m) in sensor frame
+        self.vis_sdf_res_m: float = 0.2 # resolution for the SDF slice for visualization (m)
         self.eval_traj_align: bool = True # do the SE3 alignment of the trajectory when evaluating the absolute error
-        
+
         # mesh reconstruction, marching cubes related
         self.mc_res_m: float = 0.3 # resolution for marching cubes
         self.pad_voxel: int = 2 # pad x voxels on each side
@@ -280,11 +288,16 @@ class Config:
         self.keep_local_mesh: bool = False # keep the local mesh in the visualizer or not (don't delete them could cause a too large memory consumption)
         self.infer_bs: int = 4096 # batch size for inference
 
-        # o3d visualization
+        # visualization
+        self.local_map_default_on: bool = True
+        self.neural_point_map_default_on: bool = True
         self.mesh_vis_normal: bool = False # normal colorization
         self.vis_frame_axis_len: float = 0.8 # sensor frame axis length, for visualization, unit: m
         self.vis_point_size: int = 2 # point size for visualization in o3d
         self.sensor_cad_path = None # the path to the sensor cad file, "./cad/ipb_car.ply" for visualization
+
+        # gui 
+        self.visualizer_split_width_ratio: float = 0.7 # the width ratio of the visualizer split window
 
         # result saving settings
         self.save_map: bool = False # save the neural point map model and decoders or not
@@ -308,16 +321,16 @@ class Config:
         # common settings
         if "setting" in config_args:
             self.name = config_args["setting"].get("name", "pin_slam")
-            
+
             self.use_dataloader = config_args["setting"].get("use_kiss_icp_dataloader", False)
 
             self.output_root = config_args["setting"].get("output_root", "./experiments")
-            self.pc_path = config_args["setting"].get("pc_path", "") 
+            self.pc_path = config_args["setting"].get("pc_path", "")
             self.pose_path = config_args["setting"].get("pose_path", "")
             self.calib_path = config_args["setting"].get("calib_path", "")
 
             # optional, when semantic mapping is on [semantic]
-            self.semantic_on = config_args["setting"].get("semantic_on", self.semantic_on) 
+            self.semantic_on = config_args["setting"].get("semantic_on", self.semantic_on)
             if self.semantic_on:
                 self.label_path = config_args["setting"].get("label_path", "./demo_data/labels")
 
@@ -331,7 +344,7 @@ class Config:
             self.load_model = config_args["setting"].get("load_model", self.load_model)
             if self.load_model:
                 self.model_path = config_args["setting"].get("model_path", "")
-            
+
             self.first_frame_ref = config_args["setting"].get("first_frame_ref", self.first_frame_ref)
             self.begin_frame = config_args["setting"].get("begin_frame", 0)
             self.end_frame = config_args["setting"].get("end_frame", self.end_frame)
@@ -365,10 +378,10 @@ class Config:
             self.dynamic_certainty_thre = config_args["process"].get("dynamic_certainty_thre", self.dynamic_certainty_thre)
             self.dynamic_sdf_ratio_thre = config_args["process"].get("dynamic_sdf_ratio_thre", self.dynamic_sdf_ratio_thre)
             self.dynamic_min_grad_norm_thre = config_args["process"].get("dynamic_min_grad_norm_thre", self.dynamic_min_grad_norm_thre)
-            
+
         # sampler
         if "sampler" in config_args:
-            self.surface_sample_range_m = config_args["sampler"].get("surface_sample_range_m", self.vox_down_m * 3.0) 
+            self.surface_sample_range_m = config_args["sampler"].get("surface_sample_range_m", self.vox_down_m * 3.0)
             self.free_sample_begin_ratio = config_args["sampler"].get("free_sample_begin_ratio", self.free_sample_begin_ratio)
             self.free_sample_end_dist_m = config_args["sampler"].get("free_sample_end_dist_m", self.surface_sample_range_m * 4.0) # this value should be at least 2 times of surface_sample_range_m
             self.surface_sample_n = config_args["sampler"].get("surface_sample_n", self.surface_sample_n)
@@ -384,7 +397,7 @@ class Config:
             self.feature_dim = config_args["neuralpoints"].get("feature_dim", self.feature_dim)
             # weighted the neighborhood feature before decoding to sdf or do the weighting of the decoded 
             # sdf afterwards, weighted first is faster, but may have some problem during the neural point map update after pgo
-            self.weighted_first = config_args["neuralpoints"].get("weighted_first", self.weighted_first) 
+            self.weighted_first = config_args["neuralpoints"].get("weighted_first", self.weighted_first)
             # build the neural point map from the surface samples or only the measurement points
             self.from_sample_points = config_args["neuralpoints"].get("from_sample_points", self.from_sample_points)
             if self.from_sample_points:
@@ -393,14 +406,14 @@ class Config:
             self.max_prune_certainty = config_args["neuralpoints"].get("max_prune_certainty", self.max_prune_certainty)
             self.use_mid_ts = config_args["neuralpoints"].get("use_mid_ts", self.use_mid_ts)
             self.local_map_travel_dist_ratio = config_args["neuralpoints"].get("local_map_travel_dist_ratio", self.local_map_travel_dist_ratio)
-            
+
 
         # decoder
         if "decoder" in config_args: # only on if indicated
             # number of the level of the mlp decoder
             self.geo_mlp_level = config_args["decoder"].get("mlp_level", self.geo_mlp_level)
             # dimension of the mlp's hidden layer
-            self.geo_mlp_hidden_dim = config_args["decoder"].get("mlp_hidden_dim", self.geo_mlp_hidden_dim) 
+            self.geo_mlp_hidden_dim = config_args["decoder"].get("mlp_hidden_dim", self.geo_mlp_hidden_dim)
             # freeze the decoder after runing for x frames (used for incremental mapping to avoid forgeting)
             self.freeze_after_frame = config_args["decoder"].get("freeze_after_frame", self.freeze_after_frame)
 
@@ -435,7 +448,7 @@ class Config:
             self.bs_new_sample = int(config_args["continual"].get("batch_size_new_sample", self.bs_new_sample))
             self.new_certainty_thre = float(config_args["continual"].get("new_certainty_thre", self.new_certainty_thre))
             self.pool_filter_freq = config_args["continual"].get("pool_filter_freq", 1)
-        
+
         # tracker
         if "tracker" in config_args:
             self.track_on = True
@@ -456,6 +469,7 @@ class Config:
             self.reg_term_thre_deg = float(config_args["tracker"].get("term_deg", self.reg_term_thre_deg))
             self.reg_term_thre_m = float(config_args["tracker"].get("term_m", self.reg_term_thre_m))
             self.eigenvalue_check = config_args["tracker"].get("eigenvalue_check", self.eigenvalue_check)
+            self.eigenvalue_ratio_thre = config_args["tracker"].get("eigenvalue_ratio_thre", self.eigenvalue_ratio_thre)
             self.final_residual_ratio_thre = float(config_args["tracker"].get("final_residual_ratio_thre", self.final_residual_ratio_thre))
 
         # pgo
@@ -477,13 +491,13 @@ class Config:
                 self.use_reg_cov_mat = config_args["pgo"].get("use_reg_cov", False)
                 # merge the neural point map or not after the loop, merge the map may lead to some holes
                 self.pgo_error_thre = float(config_args["pgo"].get("pgo_error_thre_frame", self.pgo_error_thre_frame))
-                self.pgo_max_iter = config_args["pgo"].get("pgo_max_iter", self.pgo_max_iter) 
-                self.pgo_merge_map = config_args["pgo"].get("merge_map", False) 
-                self.context_cosdist_threshold = config_args["pgo"].get("context_cosdist", self.context_cosdist_threshold) 
-                self.min_loop_travel_dist_ratio = config_args["pgo"].get("min_loop_travel_ratio", self.min_loop_travel_dist_ratio) 
+                self.pgo_max_iter = config_args["pgo"].get("pgo_max_iter", self.pgo_max_iter)
+                self.pgo_merge_map = config_args["pgo"].get("merge_map", False)
+                self.context_cosdist_threshold = config_args["pgo"].get("context_cosdist", self.context_cosdist_threshold)
+                self.min_loop_travel_dist_ratio = config_args["pgo"].get("min_loop_travel_ratio", self.min_loop_travel_dist_ratio)
                 self.loop_dist_drift_ratio_thre = config_args["pgo"].get("max_loop_dist_ratio", self.loop_dist_drift_ratio_thre)
                 self.local_loop_dist_thre = config_args["pgo"].get("local_loop_dist_thre", self.voxel_size_m * 5.0)
-            
+
         # mapping optimizer
         if "optimizer" in config_args:
             self.mapping_freq_frame = config_args["optimizer"].get("mapping_freq_frame", 1)
@@ -513,23 +527,27 @@ class Config:
             self.o3d_vis_on = config_args["eval"].get("o3d_vis_on", self.o3d_vis_on)
             # path to the sensor cad file
             self.sensor_cad_path = config_args["eval"].get('sensor_cad_path', None)
-            
+
+            self.local_map_default_on = config_args["eval"].get('local_map_default_on', self.local_map_default_on)
+
             # frequency for pose log (per x frame)
-            self.log_freq_frame = config_args["eval"].get('log_freq_frame', 0)
+            self.log_freq_frame = config_args["eval"].get('log_freq_frame', self.log_freq_frame)
             # frequency for mesh reconstruction (per x frame)
             self.mesh_freq_frame = config_args["eval"].get('mesh_freq_frame', self.mesh_freq_frame)
             # keep the previous reconstructed mesh in the visualizer or not
             self.keep_local_mesh = config_args["eval"].get('keep_local_mesh', self.keep_local_mesh)
             # frequency for sdf slice visualization (per x frame)
-            self.sdfslice_freq_frame = config_args["eval"].get('sdf_freq_frame', 1)
+            self.sdf_default_on = config_args["eval"].get('sdf_default_on', self.sdf_default_on)
+            self.sdfslice_freq_frame = config_args["eval"].get('sdf_freq_frame', self.sdfslice_freq_frame)
             self.sdf_slice_height = config_args["eval"].get('sdf_slice_height', self.sdf_slice_height) # in sensor frame, unit: m
-            
-            # mesh masking
+
+            # mesh related
+            self.mesh_default_on = config_args["eval"].get('mesh_default_on', self.mesh_default_on)
             self.mesh_min_nn = config_args["eval"].get('mesh_min_nn', self.mesh_min_nn)
             self.skip_top_voxel = config_args["eval"].get('skip_top_voxel', self.skip_top_voxel)
             self.min_cluster_vertices = config_args["eval"].get('min_cluster_vertices', self.min_cluster_vertices)
             self.mc_res_m = config_args["eval"].get('mc_res_m', self.voxel_size_m) # initial marching cubes grid sampling interval (unit: m)
-            
+
             # save the map or not
             self.save_map = config_args["eval"].get('save_map', self.save_map)
             self.save_merged_pc = config_args["eval"].get('save_merged_pc', self.save_merged_pc)
@@ -540,4 +558,5 @@ class Config:
         self.consistency_count = int(self.bs / 4)
         self.window_radius = max(self.max_range, 6.0) # for the sampling data poo, should not be too small
         self.local_map_radius = self.max_range + 2.0 # for the local neural points
-        self.vis_frame_axis_len = self.max_range / 50.0
+        self.vis_frame_axis_len = self.max_range / 40.0
+        self.vis_sdf_res_m = self.voxel_size_m * 0.3

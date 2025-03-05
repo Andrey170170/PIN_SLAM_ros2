@@ -68,8 +68,8 @@ class RosbagDataset:
         self.n_scans = self.bag.topics[self.topic].msgcount
 
         # limit connections to selected topic
-        connections = [x for x in self.bag.connections if x.topic == self.topic]
-        self.msgs = self.bag.messages(connections=connections)
+        self.connections = [x for x in self.bag.connections if x.topic == self.topic]
+        self.msgs = self.bag.messages(connections=self.connections)
         self.timestamps = []
 
     def __del__(self):
@@ -132,3 +132,7 @@ class RosbagDataset:
             print("[ERROR] Your dataset does not contain any sensor_msgs/msg/PointCloud2 topic")
         if len(point_cloud_topics) == 1:
             return point_cloud_topics[0]
+
+    def reset_bag(self):
+        self.timestamps = []
+        self.msgs = self.bag.messages(connections=self.connections)

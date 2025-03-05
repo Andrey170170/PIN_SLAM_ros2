@@ -44,6 +44,7 @@ class NeuralPointMapContextManager:
         self.ringkeys = [None] * self.ENOUGH_LARGE
         self.contexts_feature = [None] * self.ENOUGH_LARGE
         self.ringkeys_feature = [None] * self.ENOUGH_LARGE
+        self.valid_flags = [False] * self.ENOUGH_LARGE
 
         self.query_contexts = []
         self.tran_from_frame = []
@@ -55,7 +56,7 @@ class NeuralPointMapContextManager:
         self.virtual_sdf_thre = 0.0
 
     # fast implementation of scan context by torch
-    def add_node(self, frame_id, ptcloud, ptfeatures=None):
+    def add_node(self, frame_id, ptcloud, ptfeatures=None, valid_flag = True):
 
         # ptcloud as torch tensor
         sc, sc_feature = ptcloud2sc_torch(
@@ -68,6 +69,7 @@ class NeuralPointMapContextManager:
         self.curr_node_idx = frame_id
         self.contexts[frame_id] = sc
         self.ringkeys[frame_id] = rk
+        self.valid_flags[frame_id] = valid_flag
 
         if sc_feature is not None:
             rk_feature = sc2rk(sc_feature)
@@ -79,7 +81,7 @@ class NeuralPointMapContextManager:
 
     # use virtual node to deal with translation
     def set_virtual_node(
-        self, ptcloud_global, frame_pose, last_frame_pose, ptfeatures=None
+            self, ptcloud_global, frame_pose, last_frame_pose, ptfeatures=None
     ):
 
         if last_frame_pose is not None:
@@ -96,12 +98,12 @@ class NeuralPointMapContextManager:
             )
 
         dx = (
-            torch.arange(
-                -self.virtual_side_count,
-                self.virtual_side_count + 1,
-                device=self.device,
-            )
-            * self.virtual_step_m
+                torch.arange(
+                    -self.virtual_side_count,
+                    self.virtual_side_count + 1,
+                    device=self.device,
+                    )
+                * self.virtual_step_m
         )
 
         lat_tran = dx.view(-1, 1) @ lat_direction_unit.view(1, 3)  # N, 3
@@ -154,7 +156,7 @@ class NeuralPointMapContextManager:
 
     # main function for global loop detection
     def detect_global_loop(
-        self, cur_pgo_poses, dist_thre, loop_candidate_mask, neural_points, dist_filter = True
+            self, cur_pgo_poses, dist_thre, loop_candidate_mask, neural_points, dist_filter = True
     ):
         # TODO: use torch tensor
         if dist_filter:
@@ -166,7 +168,13 @@ class NeuralPointMapContextManager:
         else:
             global_loop_candidate_idx = np.where(loop_candidate_mask)[0]
 
+        # check valid flags
+        if global_loop_candidate_idx.shape[0] > 0:
+            valid_candidates_mask = np.array([self.valid_flags[idx] for idx in global_loop_candidate_idx], dtype=bool)
+            global_loop_candidate_idx = global_loop_candidate_idx[valid_candidates_mask]
+
         if global_loop_candidate_idx.shape[0] > 0:  # candidate exist
+
             context_pc = (
                 neural_points.local_neural_points.detach()
             )  # augment virtual poses
@@ -198,9 +206,9 @@ class NeuralPointMapContextManager:
         if loop_id is not None:
             if self.config.local_map_context:  # get init tran from cur frame to loop frame, considering the latency
                 loop_transform = (
-                    loop_transform
-                    @ np.linalg.inv(cur_pgo_poses[self.curr_node_idx])
-                    @ cur_pgo_poses[-1]
+                        loop_transform
+                        @ np.linalg.inv(cur_pgo_poses[self.curr_node_idx])
+                        @ cur_pgo_poses[-1]
                 )  # T_l<-c' = T_l<-c @ T_c<-c' = T_l<-c @ T_c<-w @ T_w<-c'
                 local_map_context_loop = True
             if not self.silence:
@@ -312,7 +320,7 @@ class NeuralPointMapContextManager:
         # find the best match (sector shifted) scan context in the candidates
         # get the yaw angle and the match frame idx at the same time
         if (
-            cosdist < self.sc_cosdist_threshold
+                cosdist < self.sc_cosdist_threshold
         ):  # the smaller the sc_cosdist_threshold, the more strict
             yawdiff_deg = yaw_diff * (360.0 / self.des_shape[1])
 
@@ -337,16 +345,16 @@ class NeuralPointMapContextManager:
             # loop detected!, transformation in numpy (should be  T_l<-c)
         else:
             return None, None, None
-        
+
     # TODO
     def save_context_dict(self, final_poses, run_path):
 
-        context_dict = {"contexts": self.contexts, 
-                        "ringkeys": self.ringkeys, 
-                        "contexts_feature": self.contexts_feature, 
+        context_dict = {"contexts": self.contexts,
+                        "ringkeys": self.ringkeys,
+                        "contexts_feature": self.contexts_feature,
                         "ringkeys_feature": self.ringkeys_feature,
                         "poses": final_poses}
-        
+
         model_save_path = os.path.join(run_path, "model", "context_dict.pth")  # end with .pth
 
         torch.save(context_dict, model_save_path)
@@ -358,7 +366,7 @@ class NeuralPointMapContextManager:
         loaded_dict = torch.load(dict_path)
         self.contexts = loaded_dict["contexts"]
         self.ringkeys = loaded_dict["ringkeys"]
-        
+
         recorded_poses_in_map = loaded_dict["poses"]
 
         return recorded_poses_in_map
@@ -389,7 +397,7 @@ class GTLoopManager:
                 self.gt_position[node_idx] - self.gt_position[node_idx - 1]
             )
             self.travel_dist[node_idx] = (
-                self.travel_dist[node_idx - 1] + travel_dist_in_frame
+                    self.travel_dist[node_idx - 1] + travel_dist_in_frame
             )
 
     def detect_loop(self):
@@ -402,7 +410,7 @@ class GTLoopManager:
                 self.gt_position[self.curr_node_idx]
                 - np.array(self.gt_position[:valid_recent_node_idx]),
                 axis=1,
-            )
+                )
             # print(dist_to_past)
             travel_dist_to_past = self.travel_dist[self.curr_node_idx] - np.array(
                 self.travel_dist[:valid_recent_node_idx]
@@ -410,8 +418,8 @@ class GTLoopManager:
 
             # 0 to valid_recent_node_idx
             candidate_mask = (
-                travel_dist_to_past > self.min_travel_dist_ratio * dist_to_past
-            ) & (travel_dist_to_past > 30.0)
+                                     travel_dist_to_past > self.min_travel_dist_ratio * dist_to_past
+                             ) & (travel_dist_to_past > 30.0)
 
             candidate_idx = np.where(candidate_mask)[0]
             candidate_dist = dist_to_past[candidate_mask]
@@ -424,8 +432,8 @@ class GTLoopManager:
                 if loop_dist < self.max_loop_dist:
                     # T_l<-c = T_l<-w @ T_w<-c
                     loop_trans = (
-                        np.linalg.inv(self.gt_pose[loop_index])
-                        @ self.gt_pose[self.curr_node_idx]
+                            np.linalg.inv(self.gt_pose[loop_index])
+                            @ self.gt_pose[self.curr_node_idx]
                     )
                     return loop_index, loop_dist, loop_trans
 
@@ -433,23 +441,23 @@ class GTLoopManager:
 
 
 def detect_local_loop(
-    pgo_poses,
-    loop_candidate_mask,
-    cur_drift,
-    cur_frame_id,
-    loop_reg_failed_count=0,
-    dist_thre=1.0,
-    drift_thre=3.0, 
-    silence=False,
+        pgo_poses,
+        loop_candidate_mask,
+        cur_drift,
+        cur_frame_id,
+        loop_reg_failed_count=0,
+        dist_thre=1.0,
+        drift_thre=3.0,
+        silence=False,
 ):
     """
     Detect local loop closure candidate by according to distance
     """
-    dist_to_past = np.linalg.norm(pgo_poses[:,:3,3] - pgo_poses[-1,:3,3], axis=1) 
+    dist_to_past = np.linalg.norm(pgo_poses[:,:3,3] - pgo_poses[-1,:3,3], axis=1)
     min_dist = np.min(dist_to_past[loop_candidate_mask])
     min_index = np.where(dist_to_past == min_dist)[0]
     if (
-        min_dist < dist_thre and cur_drift < drift_thre and loop_reg_failed_count < 3
+            min_dist < dist_thre and cur_drift < drift_thre and loop_reg_failed_count < 3
     ):  # local loop
         loop_id, loop_dist = min_index[0], min_dist  # a candidate found
         loop_transform = np.linalg.inv(pgo_poses[loop_id]) @ pgo_poses[-1]
@@ -467,7 +475,7 @@ def detect_local_loop(
     else:
         # if not silence:
         #     print("No local loop")
-                
+
         return None, None, None
 
 
@@ -499,7 +507,7 @@ def ptcloud2sc_torch(ptcloud, pt_feature, sc_shape, max_length):
             pt_feature.shape[1],
             dtype=points.dtype,
             device=points.device,
-        )
+            )
 
     # Calculate the angle (θ) using the arctan2 function
     theta = torch.atan2(points[:, 1], points[:, 0])  # [-pi, pi] # rad

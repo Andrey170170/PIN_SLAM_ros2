@@ -11,7 +11,7 @@ import numpy as np
 import open3d as o3d
 import rclpy
 import std_msgs.msg
-import tf_transformations as tf
+import transforms3d as tf
 import tf2_ros
 import torch
 import wandb
@@ -300,7 +300,8 @@ class PINSLAMer(Node):
     def publish_msg(self, input_pc_msg):
 
         cur_pose = self.dataset.cur_pose_ref
-        cur_q = tf.quaternion_from_matrix(cur_pose)
+        cur_q = tf.quaternions.quat2mat(cur_pose)
+        cur_q[0], cur_q[1], cur_q[2], cur_q[3] = cur_q[1], cur_q[2], cur_q[3], cur_q[0]
         cur_t = cur_pose[0:3,3]
 
         pose_msg = PoseStamped()
@@ -341,7 +342,8 @@ class PINSLAMer(Node):
             self.path_msg.poses = []
             for i in range(self.dataset.processed_frame):
                 cur_pose = self.dataset.pgo_poses[i]
-                cur_q = tf.quaternion_from_matrix(cur_pose)
+                cur_q = tf.quaternions.quat2mat(cur_pose)
+                cur_q[0], cur_q[1], cur_q[2], cur_q[3] = cur_q[1], cur_q[2], cur_q[3], cur_q[0]
                 cur_t = cur_pose[0:3,3]
 
                 pose_msg = PoseStamped()
